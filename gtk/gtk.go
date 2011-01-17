@@ -734,6 +734,7 @@ import "gdkpixbuf"
 import "unsafe"
 import "reflect"
 import "container/vector"
+import "sync"
 
 func bool2gboolean(b bool) C.gboolean {
 	if b {
@@ -5337,6 +5338,8 @@ type CallbackContext struct {
 }
 
 var callback_contexts *vector.Vector
+var goCallbacks []func()
+var goCallbacksLk sync.Mutex
 var main_loop bool = true
 
 func pollEvents() {
@@ -5344,6 +5347,19 @@ func pollEvents() {
 		if use_gtk_main == false {
 			C.gtk_main_iteration_do(C.gboolean(1))
 		}
+
+		var f func()
+		goCallbacksLk.Lock()
+		if len(goCallbacks) > 0 {
+			f = goCallbacks[0]
+			goCallbacks = goCallbacks[1:]
+		}
+		goCallbacksLk.Unlock()
+
+		if f != nil {
+			f()
+		}
+
 		var cbi C.callback_info
 		if C.callback_info_get_current(&cbi) != C.int(0) && cbi.fire == C.int(0) {
 			context := callback_contexts.At(int(cbi.func_no)).(*CallbackContext)
@@ -5373,6 +5389,12 @@ func pollEvents() {
 			C.callback_info_free_args(&cbi)
 		}
 	}
+}
+
+func CbHack(f func()) {
+	goCallbacksLk.Lock()
+	goCallbacks = append(goCallbacks, f)
+	goCallbacksLk.Unlock()
 }
 
 func SetLocale() {
